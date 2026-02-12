@@ -1,107 +1,270 @@
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, Events } = require('discord.js');
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
+const {
+  Client,
+  GatewayIntentBits,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ChannelType,
+  PermissionsBitField
+} = require("discord.js");
 
-const token = 'SEU_TOKEN_AQUI';
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds]
+});
 
-// Variáveis de fila
-let fila = [];
-let modoEscolhido = null;
-let valorEscolhido = null;
-let filaMessage = null;
+const filas = {};
 
-// Valores disponíveis
-const valores = [1, 5, 10, 20, 50, 100];
+client.once("ready", () => {
+  console.log(`✅ ORG TK v3 online como ${client.user.tag}`);
+});
 
-function gerarEmbedFila() {
+function criarEmbedFila(fila) {
   return new EmbedBuilder()
-    .setTitle('🏆 ORG TK 0% TAXA 🏆')
-    .addFields(
-      { name: '🎮 Modo:', value: modoEscolhido || 'Não escolhido', inline: true },
-      { name: '💰 Valor:', value: valorEscolhido ? `R$ ${valorEscolhido}` : 'Não escolhido', inline: true },
-      { name: `👥 Jogadores na fila (${fila.length}/? )`, value: fila.length ? fila.join('\n') : 'Nenhum jogador ainda', inline: false }
+    .setAuthor({ name: "ORG TK • Sistema Oficial" })
+    .setTitle("🎮 Fila Ativa")
+    .setDescription(
+      `🏆 **Modo:** ${fila.modo.toUpperCase()}\n` +
+      `💰 **Valor:** R$ ${fila.valor}\n\n` +
+      `👥 **Jogadores (${fila.jogadores.length}/${fila.max}):**\n` +
+      (fila.jogadores.length > 0
+        ? fila.jogadores.map(id => `<@${id}>`).join("\n")
+        : "Ninguém entrou ainda.")
     )
-    .setFooter({ text: 'ORG TK • Sistema de Fila' })
-    .setColor('Blue');
+    .setColor("#0099ff")
+    .setFooter({ text: "ORG TK © 2026" })
+    .setTimestamp();
 }
 
-// Comando !fila
-client.on('messageCreate', async (message) => {
-  if (message.content === '!fila') {
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('modo_1v1').setLabel('1v1').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('modo_2v2').setLabel('2v2').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('modo_3v3').setLabel('3v3').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('modo_4v4').setLabel('4v4').setStyle(ButtonStyle.Primary)
-    );
+client.on("interactionCreate", async (interaction) => {
+  try {
 
-    const valorRow = new ActionRowBuilder();
-    valores.forEach((v, i) => {
-      valorRow.addComponents(
-        new ButtonBuilder().setCustomId(`valor_${v}`).setLabel(`R$ ${v}`).setStyle(ButtonStyle.Secondary)
+    // ===== COMANDO /painel =====
+    if (interaction.isChatInputCommand()) {
+      if (interaction.commandName === "painel") {
+
+        const embed = new EmbedBuilder()
+          .setAuthor({ name: "ORG TK • Sistema Oficial" })
+          .setTitle("🎮 Painel de Partidas")
+          .setDescription(
+            "1️⃣ Escolha o modo\n" +
+            "2️⃣ Escolha o valor\n" +
+            "3️⃣ Entre na fila\n\n" +
+            "⚡ A partida inicia automaticamente."
+          )
+          .setColor("#0099ff");
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("modo_1v1").setLabel("🔥 1v1").setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId("modo_2v2").setLabel("⚔ 2v2").setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId("modo_3v3").setLabel("💥 3v3").setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId("modo_4v4").setLabel("👑 4v4").setStyle(ButtonStyle.Primary)
+        );
+
+        await interaction.reply({ embeds: [embed], components: [row] });
+      }
+    }
+
+    if (!interaction.isButton()) return;
+
+    // ===== ESCOLHER MODO =====
+    if (interaction.customId.startsWith("modo_")) {
+
+      const modo = interaction.customId.replace("modo_", "");
+
+      const embed = new EmbedBuilder()
+        .setAuthor({ name: "ORG TK • Seleção de Valor" })
+        .setTitle(`💰 Modo ${modo.toUpperCase()}`)
+        .setDescription("Escolha o valor da partida:")
+        .setColor("#00c3ff");
+
+      const valores = [1, 2, 5, 10, 20, 50, 100];
+
+      const row1 = new ActionRowBuilder();
+      const row2 = new ActionRowBuilder();
+
+      valores.forEach((valor, index) => {
+        const botao = new ButtonBuilder()
+          .setCustomId(`valor_${modo}_${valor}`)
+          .setLabel(`💲 ${valor}`)
+          .setStyle(ButtonStyle.Secondary);
+
+        if (index < 4) row1.addComponents(botao);
+        else row2.addComponents(botao);
+      });
+
+      await interaction.update({
+        embeds: [embed],
+        components: [row1, row2]
+      });
+    }
+
+    // ===== CRIAR FILA =====
+    else if (interaction.customId.startsWith("valor_")) {
+
+      const partes = interaction.customId.split("_");
+      const modo = partes[1];
+      const valor = parseInt(partes[2]);
+      const maxJogadores = parseInt(modo[0]) * 2;
+      const filaId = `${modo}_${valor}`;
+
+      if (filas[filaId]) {
+        return interaction.reply({
+          content: "⚠️ Já existe uma fila ativa com esse valor.",
+          ephemeral: true
+        });
+      }
+
+      filas[filaId] = {
+        modo,
+        valor,
+        jogadores: [],
+        max: maxJogadores,
+        criadaEm: Date.now()
+      };
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`entrar_${filaId}`)
+          .setLabel("✅ Entrar")
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(`sair_${filaId}`)
+          .setLabel("❌ Sair")
+          .setStyle(ButtonStyle.Danger)
       );
-    });
 
-    filaMessage = await message.channel.send({ embeds: [gerarEmbedFila()], components: [row, valorRow] });
+      await interaction.update({
+        embeds: [criarEmbedFila(filas[filaId])],
+        components: [row]
+      });
+    }
+
+    // ===== ENTRAR =====
+    else if (interaction.customId.startsWith("entrar_")) {
+
+      const filaId = interaction.customId.replace("entrar_", "");
+      const fila = filas[filaId];
+
+      if (!fila)
+        return interaction.reply({ content: "⚠️ Fila encerrada.", ephemeral: true });
+
+      if (fila.jogadores.includes(interaction.user.id))
+        return interaction.reply({ content: "⚠️ Você já está na fila.", ephemeral: true });
+
+      if (fila.jogadores.length >= fila.max)
+        return interaction.reply({ content: "🚫 Fila cheia.", ephemeral: true });
+
+      fila.jogadores.push(interaction.user.id);
+
+      await interaction.update({
+        embeds: [criarEmbedFila(fila)],
+        components: interaction.message.components
+      });
+
+      if (fila.jogadores.length === fila.max) {
+
+        const totalPartida = fila.valor * fila.max;
+        const idPartida = `${fila.modo}-${Date.now()}`;
+
+        // ===== CRIAR CATEGORIA SE NÃO EXISTIR =====
+        let categoria = interaction.guild.channels.cache.find(
+          c => c.name === "PARTIDAS ORG TK" && c.type === ChannelType.GuildCategory
+        );
+
+        if (!categoria) {
+          categoria = await interaction.guild.channels.create({
+            name: "PARTIDAS ORG TK",
+            type: ChannelType.GuildCategory
+          });
+        }
+
+        // ===== CRIAR CANAL DA PARTIDA =====
+        const canal = await interaction.guild.channels.create({
+          name: `partida-${fila.modo}-${fila.valor}`,
+          type: ChannelType.GuildText,
+          parent: categoria.id,
+          permissionOverwrites: [
+            {
+              id: interaction.guild.id,
+              deny: [PermissionsBitField.Flags.ViewChannel]
+            },
+            ...fila.jogadores.map(id => ({
+              id: id,
+              allow: [PermissionsBitField.Flags.ViewChannel]
+            }))
+          ]
+        });
+
+        await canal.send(
+          `🔥 **Partida iniciada!**\n\n` +
+          fila.jogadores.map(id => `<@${id}>`).join("\n")
+        );
+
+        // ===== LOG AUTOMÁTICO =====
+        let canalLog = interaction.guild.channels.cache.find(
+          c => c.name === "log-partidas"
+        );
+
+        if (!canalLog) {
+          canalLog = await interaction.guild.channels.create({
+            name: "log-partidas",
+            type: ChannelType.GuildText
+          });
+        }
+
+        const embedLog = new EmbedBuilder()
+          .setTitle("📜 Nova Partida Registrada")
+          .setColor("#00ff99")
+          .addFields(
+            { name: "🎮 Modo", value: fila.modo.toUpperCase(), inline: true },
+            { name: "💰 Valor", value: `R$ ${fila.valor}`, inline: true },
+            { name: "💎 Total", value: `R$ ${totalPartida}`, inline: true },
+            {
+              name: "👥 Jogadores",
+              value: fila.jogadores.map(id => `<@${id}>`).join("\n")
+            }
+          )
+          .setFooter({ text: `ID: ${idPartida}` })
+          .setTimestamp();
+
+        await canalLog.send({ embeds: [embedLog] });
+
+        // ===== AUTO DELETAR EM 30 MIN =====
+        setTimeout(() => {
+          if (canal) canal.delete().catch(() => {});
+        }, 30 * 60 * 1000);
+
+        delete filas[filaId];
+      }
+    }
+
+    // ===== SAIR =====
+    else if (interaction.customId.startsWith("sair_")) {
+
+      const filaId = interaction.customId.replace("sair_", "");
+      const fila = filas[filaId];
+
+      if (!fila)
+        return interaction.reply({ content: "⚠️ Fila encerrada.", ephemeral: true });
+
+      fila.jogadores = fila.jogadores.filter(id => id !== interaction.user.id);
+
+      await interaction.update({
+        embeds: [criarEmbedFila(fila)],
+        components: interaction.message.components
+      });
+    }
+
+  } catch (error) {
+    console.error("ERRO:", error);
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({
+        content: "❌ Ocorreu um erro interno.",
+        ephemeral: true
+      });
+    }
   }
 });
 
-// Listener de botão
-client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isButton()) return;
-
-  // Modo
-  if (interaction.customId.startsWith('modo_')) {
-    modoEscolhido = interaction.customId.replace('modo_', '');
-  }
-
-  // Valor
-  if (interaction.customId.startsWith('valor_')) {
-    valorEscolhido = interaction.customId.replace('valor_', '');
-  }
-
-  // Adicionar jogador
-  if (!fila.includes(interaction.user.username)) {
-    fila.push(interaction.user.username);
-  }
-
-  // Atualizar embed
-  if (filaMessage) {
-    await interaction.update({ embeds: [gerarEmbedFila()] });
-  } else {
-    await interaction.reply({ content: 'Erro: filaMessage não encontrado.', ephemeral: true });
-    return;
-  }
-
-  // Criar canal automático se fila completa
-  let tamanhoFila = 1;
-  if (modoEscolhido === '1v1') tamanhoFila = 2;
-  if (modoEscolhido === '2v2') tamanhoFila = 4;
-  if (modoEscolhido === '3v3') tamanhoFila = 6;
-  if (modoEscolhido === '4v4') tamanhoFila = 8;
-
-  if (fila.length === tamanhoFila) {
-    const guild = interaction.guild;
-    const canalName = `partida-${modoEscolhido}`;
-    guild.channels.create({
-      name: canalName,
-      type: 0, // GUILD_TEXT
-      permissionOverwrites: [
-        {
-          id: guild.id,
-          deny: ['ViewChannel']
-        },
-        ...fila.map((username) => {
-          const member = guild.members.cache.find((m) => m.user.username === username);
-          return member ? { id: member.id, allow: ['ViewChannel', 'SendMessages'] } : null;
-        }).filter(Boolean)
-      ]
-    }).then(() => {
-      fila = []; // limpar fila
-      modoEscolhido = null;
-      valorEscolhido = null;
-      filaMessage.edit({ embeds: [gerarEmbedFila()] });
-    });
-  }
-});
-
-client.login(token);
+client.login(process.env.TOKEN);
